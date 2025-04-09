@@ -1,0 +1,90 @@
+name: chocolatine
+run-name: chocolatine
+on:
+    pull_request:
+        branches-ignore:
+            - 'mirror/**'
+            - 'ga-ignore-**'
+    push:
+        branches-ignore:
+            -'mirror/**'
+            - 'ga-ignore-**'
+
+env:
+    MIRROR_URL: "git@github.com:EpitechPGEPromo2029/B-DOP-200-REN-2-1-chocolatine-titouan.hochet.git"
+    EXECUTABLES: ${{vars.GIT_BINARIES}}
+
+jobs:
+    check_coding_style:
+        name: check_coding_style
+        runs-on: ubuntu-latest
+        container: ghcr.io/epitech/coding-style-checker:latest
+        steps:
+            - uses: actions/checkout@v3
+            - id: check_coding_style
+              run: |
+                check.sh "$(pwd)" "$(pwd)"
+                if [ -f coding-style-reports.log ]; then
+                    while IFS= read -r ERROR; do
+                        filename=$(echo "$ERROR" | cut -d':' -f 1)
+                        line=$(echo "$ERROR" | cut -d':' -f 2)
+                        error=$(echo "$ERROR" | cut -d':' -f 3-)
+                        echo "::error file=${filename#./},line=${line},title=coding style error::${error}"
+                    done < coding-style-reports.log
+                fi
+                NB_ERROR=$(cat coding-style-reports.log | wc -l)
+                if [ $NB_ERROR -gt 0 ]; then
+                    exit 1
+                fi
+
+    check_program_compilation:
+        needs: check_coding_style
+        name: check_program_compilation
+        runs-on: ubuntu-latest
+        container :
+            image: epitechcontent/epitest-docker
+
+        steps:
+            - uses: actions/checkout@v3
+            - id: check_program_compilation
+              run: make
+              timeout-minutes: 2
+            - run: make clean
+            - run: |
+                OIFS=$IFS
+                IFS=','
+                for x in $EXECUTABLES; do
+                    if [ ! -x "./$x" ]; then
+                        echo "Error: Executable ./$x not found or not executable."
+                        exit 1
+                    fi
+                done
+                IFS=$OIFS
+
+    run_test:
+        needs: check_program_compilation
+        name: launch tests
+        runs-on: ubuntu-latest
+        container:
+            image: epitechcontent/epitest-docker
+
+        steps:
+            - uses: actions/checkout@v3
+            - id: run_tests
+              run: make tests_run
+              timeout-minutes: 2
+
+    push_to_mirror:
+        name: push to mirror
+        needs: run_test
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@v3
+          with:
+            fetch-depth: 0
+        - uses: pixta-dev/repository-mirroring-action@v1
+          with:
+            target_repo_url:
+                ${{env.MIRROR_URL}}
+            ssh_private_key:
+                ${{secrets.GIT_SSH_PRIVATE_KEY}}
